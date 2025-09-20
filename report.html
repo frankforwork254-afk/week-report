@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>週報產生器</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    h2 { margin-top: 20px; }
+    .project, .recipient { border: 1px solid #ccc; padding: 10px; margin: 10px 0; border-radius: 5px; }
+    .project input, .recipient input, textarea { margin: 5px; }
+    button { margin: 5px; padding: 5px 10px; }
+    textarea { width: 100%; margin-top: 10px; }
+    .subject-preview { margin: 10px 0; font-weight: bold; color: darkblue; }
+    .settings { margin: 15px 0; padding: 10px; border: 1px dashed #999; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h1>專案週報產生器</h1>
+
+  <h2>收件人設定</h2>
+  <div id="recipientsBox"></div>
+  <button onclick="addRecipient()">新增收件人</button>
+
+  <div class="subject-preview">
+    📌 主旨預覽：<span id="subjectPreview"></span>
+  </div>
+
+  <h2>寄送設定</h2>
+  <div class="settings">
+    <label>
+      <input type="radio" name="sendMode" value="outlook" onchange="saveData()"> 只用 Outlook
+    </label><br>
+    <label>
+      <input type="radio" name="sendMode" value="fallback" onchange="saveData()"> Outlook + Mail 備援
+    </label>
+  </div>
+
+  <h2>本週</h2>
+  <div id="thisWeek"></div>
+  <button onclick="addProject('thisWeek')">新增本週專案</button>
+
+  <h2>下週</h2>
+  <div id="nextWeek"></div>
+  <button onclick="addProject('nextWeek')">新增下週專案</button>
+  <button onclick="moveNextToThis()">下週 → 本週</button>
+
+  <h2>簽名檔</h2>
+  <textarea id="signature" placeholder="輸入簽名檔..." rows="4" style="width:100%;" oninput="saveData()"></textarea>
+
+  <h2>輸出</h2>
+  <button onclick="generateReport()">生成週報</button>
+  <textarea id="report" rows="12"></textarea>
+  <br>
+  <button onclick="sendOutlook()">寄送到 Outlook</button>
+
+  <script>
+    // ====== 日期處理 ======
+    function getWeekRange(offset = 0) {
+      const today = new Date();
+      const first = today.getDate() - today.getDay() + 1 + offset * 7; // 週一
+      const last = first + 6; // 週日
+      const start = new Date(today.setDate(first));
+      const end = new Date(today.setDate(last));
+      return [start, end];
+    }
+
+    function formatDate(date) {
+      return date.toISOString().split('T')[0].replace(/-/g, '/');
+    }
+
+    function updateSubjectPreview() {
+      const [thisStart, thisEnd] = getWeekRange(0);
+      const subjectText = `週報 (${formatDate(thisStart)} ~ ${formatDate(thisEnd)})`;
+      document.getElementById("subjectPreview").innerText = subjectText;
+      return subjectText;
+    }
+
+    // ====== 收件人處理 ======
+    function addRecipient(value = "") {
+      const container = document.getElementById("recipientsBox");
+      const div = document.createElement("div");
+      div.className = "recipient";
+      div.innerHTML = `
+        收件人: <input type="email" placeholder="example@domain.com" value="${value}" oninput="saveData()">
+        <button onclick="this.parentNode.remove(); saveData()">刪除</button>
+      `;
+      container.appendChild(div);
+      saveData();
+    }
+
+    function getRecipients() {
+      const recipients = [];
+      document.querySelectorAll("#recipientsBox input").forEach(input => {
+        if (input.value.trim()) {
+          recipients.push(input.value.trim());
+        }
+      });
+      return recipients;
+    }
+
+    // ====== 專案處理 ======
+    function addProject(containerId, values = {}) {
+      const container = document.getElementById(containerId);
+      const div = document.createElement("div");
+      div.className = "project";
+      div.innerHTML = `
+        客戶: <input type="text" placeholder="客戶名稱" value="${values.client || ''}" oninput="saveData()"><br>
+        專案: <input type="text" placeholder="專案名稱" value="${values.project || ''}" oninput="saveData()"><br>
+        進度: <input type="text" placeholder="進度描述" value="${values.progress || ''}" oninput="saveData()"><br>
+        達成率: <input type="number" min="0" max="100" value="${values.completion || 0}" oninput="saveData()">%<br>
+        <button onclick="this.parentNode.remove(); saveData()">刪除</button>
+      `;
+      container.appendChild(div);
+      saveData();
+    }
+
+    function moveNextToThis() {
+      const nextProjects = document.querySelectorAll("#nextWeek .project");
+      nextProjects.forEach(proj => {
+        const inputs = proj.querySelectorAll("input");
+        const values = {
+          client: inputs[0].value,
+          project: inputs[1].value,
+          progress: inputs[2].value,
+          completion: inputs[3].value
+        };
+        addProject("thisWeek", values);
+      });
+      document.getElementById("nextWeek").innerHTML = ""; // 清空下週
+      saveData();
+    }
+
+    // ====== 週報生成 ======
+    function generateReport() {
+      const [thisStart, thisEnd] = getWeekRange(0);
+      const [nextStart, nextEnd] = getWeekRange(1);
+      let report = "";
+
+      // 本週
+      report += `本週 (${formatDate(thisStart)} ~ ${formatDate(thisEnd)})\n`;
+      document.querySelectorAll("#thisWeek .project").forEach((proj, i) => {
+        const inputs = proj.querySelectorAll("input");
+        report += `${i+1}. ${inputs[0].value} - ${inputs[1].value}\n`;
+        report += `進度：${inputs[2].value}\n`;
+        report += `達成率：${inputs[3].value}%\n\n`;
+      });
+
+      // 下週
+      report += `下週 (${formatDate(nextStart)} ~ ${formatDate(nextEnd)})\n`;
+      document.querySelectorAll("#nextWeek .project").forEach((proj, i) => {
+        const inputs = proj.querySelectorAll("input");
+        report += `${i+1}. ${inputs[0].value} - ${inputs[1].value}\n`;
+        report += `進度：${inputs[2].value}\n`;
+        report += `達成率：${inputs[3].value}%\n\n`;
+      });
+
+      // 簽名檔
+      const signature = document.getElementById("signature").value.trim();
+      if (signature) {
+        report += `\n--\n${signature}`;
+      }
+
+      document.getElementById("report").value = report;
+      updateSubjectPreview();
+    }
+
+    // ====== 寄送 ======
+    function sendOutlook() {
+      const subjectText = updateSubjectPreview();
+      const subject = encodeURIComponent(subjectText);
+      const body = encodeURIComponent(document.getElementById("report").value);
+      const recipients = encodeURIComponent(getRecipients().join(";"));
+
+      const sendMode = document.querySelector('input[name="sendMode"]:checked')?.value || "outlook";
+
+      if (sendMode === "outlook") {
+        // 只用 Outlook
+        const outlookUrl = `outlook://compose?to=${recipients}&subject=${subject}&body=${body}`;
+        window.location.href = outlookUrl;
+      } else {
+        // Outlook + Mail 備援
+        const outlookUrl = `outlook://compose?to=${recipients}&subject=${subject}&body=${body}`;
+        window.location.href = outlookUrl;
+        setTimeout(() => {
+          window.location.href = `mailto:${recipients}?subject=${subject}&body=${body}`;
+        }, 300); // 縮短延遲
+      }
+    }
+
+    // ====== 自動儲存 / 載入 ======
+    function saveData() {
+      const data = {
+        recipients: getRecipients(),
+        signature: document.getElementById("signature").value,
+        sendMode: document.querySelector('input[name="sendMode"]:checked')?.value || "outlook",
+        thisWeek: [],
+        nextWeek: []
+      };
+
+      document.querySelectorAll("#thisWeek .project").forEach(proj => {
+        const inputs = proj.querySelectorAll("input");
+        data.thisWeek.push({
+          client: inputs[0].value,
+          project: inputs[1].value,
+          progress: inputs[2].value,
+          completion: inputs[3].value
+        });
+      });
+
+      document.querySelectorAll("#nextWeek .project").forEach(proj => {
+        const inputs = proj.querySelectorAll("input");
+        data.nextWeek.push({
+          client: inputs[0].value,
+          project: inputs[1].value,
+          progress: inputs[2].value,
+          completion: inputs[3].value
+        });
+      });
+
+      localStorage.setItem("weeklyReportData", JSON.stringify(data));
+    }
+
+    function loadData() {
+      const raw = localStorage.getItem("weeklyReportData");
+      if (!raw) {
+        updateSubjectPreview();
+        return;
+      }
+      const data = JSON.parse(raw);
+
+      (data.recipients || []).forEach(r => addRecipient(r));
+      (data.thisWeek || []).forEach(p => addProject("thisWeek", p));
+      (data.nextWeek || []).forEach(p => addProject("nextWeek", p));
+      document.getElementById("signature").value = data.signature || "";
+
+      // 寄送模式
+      if (data.sendMode) {
+        document.querySelector(`input[name="sendMode"][value="${data.sendMode}"]`).checked = true;
+      } else {
+        document.querySelector('input[name="sendMode"][value="outlook"]').checked = true;
+      }
+
+      updateSubjectPreview();
+    }
+
+    window.onload = loadData;
+  </script>
+</body>
+</html>
